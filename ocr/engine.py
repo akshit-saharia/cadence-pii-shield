@@ -1,8 +1,16 @@
+import os
+import shutil
+
 import pytesseract
 from pytesseract import Output
 import numpy as np
 
-pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+# Portable Tesseract resolution: env var > PATH > fallback Windows path
+pytesseract.pytesseract.tesseract_cmd = (
+    os.environ.get("TESSERACT_CMD")
+    or shutil.which("tesseract")
+    or r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+)
 
 
 def run_tesseract(image: np.ndarray, psm: int = 6) -> list[dict]:
