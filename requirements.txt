@@ -1,0 +1,6 @@
+pymupdf
+pdfplumber
+python-docx
+python-pptx
+pydantic
+pytest
