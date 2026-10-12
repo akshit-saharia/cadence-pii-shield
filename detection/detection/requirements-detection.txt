@@ -1,0 +1,5 @@
+phonenumbers>=8.13
+pytest>=7.0
+# optional (better name detection): 
+# spacy>=3.7
+# then: python -m spacy download en_core_web_sm
