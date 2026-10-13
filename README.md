@@ -25,7 +25,8 @@ Documents (PDF / DOCX / PPTX) -> **extract** -> **OCR** embedded images -> **det
     python pipeline.py                       # demo on data/sample_blocks.json
     python pipeline.py a.pdf b.docx c.pptx --show
     python pipeline.py some_folder/ --out outputs
-    pytest                                   # all suites
+    pytest
+    streamlit run app/streamlit_app.py       # launch the web UI                                 # all suites
 
 Outputs go to `outputs/` (`exposure_report.json|md`, `llm_payload.json`, `redacted_blocks.json`);
 the encrypted token vault goes to `data/vault/` (git-ignore it; never commit `.vault.key`).
@@ -44,5 +45,5 @@ answer = res.rehydrate(llm_reply)   # tokens -> original values, for the end use
 2. **The gate re-scans with the same detector**, so it cannot catch what detection cannot see.
    "0 PII with protection" is only as good as detection recall. Measure it (`evaluation/` is still empty).
 3. Without `phonenumbers` / `spaCy` installed, phone and name recall drop sharply.
-4. Still empty placeholders: `app/streamlit_app.py`, `app/demo_notebook.ipynb`, `evaluation/*`, `docs/*.png`, `ocr/image_router.py`.
+
 5. `tests/test_redaction_independent.py` targets an older redaction API and is skipped (rewrite or delete).
