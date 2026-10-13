@@ -1,0 +1,20 @@
+[
+  {"id": "hr_p1_b1", "file": "hr_onboarding.docx", "page_or_slide": 1,
+   "text": "Employee record. Name: Priya Nair, DOB: 14/03/1989, SSN 123-45-6789, email priya@example.com, phone +91 98765 43210, EMP-38104",
+   "bbox": null, "source": "native", "ocr_conf": 1.0},
+  {"id": "hr_p1_b2", "file": "hr_onboarding.docx", "page_or_slide": 1,
+   "text": "Card ending in 4417 was used. Ticket INC-20456 was raised by EMP-38104 against risk item RSK-1002.",
+   "bbox": null, "source": "native", "ocr_conf": 1.0},
+  {"id": "pol_p1_b1", "file": "security_policy.pdf", "page_or_slide": 1,
+   "text": "All incident tickets (INC-20456) must be triaged within 24 hours. Escalate to the security team and review the risk register monthly.",
+   "bbox": null, "source": "native", "ocr_conf": 1.0},
+  {"id": "kyc_p1_b1", "file": "kyc_scan.pdf", "page_or_slide": 1,
+   "text": "PAN: ABCDE1234F  Name: Rahul Verma",
+   "bbox": [40, 60, 400, 90], "source": "ocr", "ocr_conf": 0.91},
+  {"id": "kyc_p1_b2", "file": "kyc_scan.pdf", "page_or_slide": 1,
+   "text": "Addr: l2/4 Gandhi Rd, Pun e 4l1001  Ph: 98l76 5432O",
+   "bbox": [40, 100, 400, 130], "source": "ocr", "ocr_conf": 0.38},
+  {"id": "pay_s2_b1", "file": "payments.pptx", "page_or_slide": 2,
+   "text": "Customer card number: 4111 1111 1111 1111 (visa). Contact: rahul.v@example.org",
+   "bbox": null, "source": "native", "ocr_conf": 1.0}
+]

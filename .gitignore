@@ -4,3 +4,6 @@ __pycache__/
 .venv/
 venv/
 .env
+data/vault/
+outputs/
+.vault.key

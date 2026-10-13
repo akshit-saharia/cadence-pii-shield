@@ -1,6 +1,18 @@
+# P1 extraction
 pymupdf
 pdfplumber
 python-docx
 python-pptx
-pydantic
-pytest
+# P2 OCR  (also needs the Tesseract binary: https://github.com/tesseract-ocr/tesseract, or set TESSERACT_CMD)
+opencv-python
+pytesseract
+pillow
+numpy
+# P3 detection
+phonenumbers>=8.13
+# optional, better PERSON detection:  pip install spacy && python -m spacy download en_core_web_sm
+# P4 redaction
+cryptography
+# dev / UI
+pytest>=7.0
+# streamlit
