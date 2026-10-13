@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import tempfile
 from pathlib import Path
@@ -39,6 +40,12 @@ ENTITY_EMOJI = {
     "EMAIL": "📧", "PHONE": "📞", "DOB": "🎂", "ADDRESS": "🏠", "PERSON": "👤",
 }
 
+# Regex matching any [TOKEN] pattern produced by the redactor
+_TOKEN_PATTERN = re.compile(r"(\[[A-Z][A-Z_]*(?::[A-Z]+)?(?:_\d+)?\])")
+
+# How many PII items to show per entity type before collapsing
+PII_SHOW_LIMIT = 10
+
 
 # ── helpers ───────────────────────────────────────────────────────────────────
 def _badge(label: str) -> str:
@@ -50,6 +57,81 @@ def _gate_badge(decision: str) -> str:
     if decision == "ALLOW":
         return ":green[✅ **ALLOW**]"
     return ":red[🚫 **BLOCK**]"
+
+
+def _token_color(tok: str) -> str:
+    """Colour-code tokens by tier: HIGH=red, LOW=green, MEDIUM=yellow."""
+    if "REDACTED" in tok:
+        return "#d62728"
+    if "PERSON" in tok:
+        return "#2ca02c"
+    return "#ffd166"
+
+
+def _highlight_tokens(text: str) -> str:
+    """Wrap [TOKEN] markers in a colour-coded chip for display."""
+    def repl(m):
+        tok = m.group(1)
+        color = _token_color(tok)
+        return (
+            f"<span style='background:{color};color:#000;padding:1px 5px;"
+            f"border-radius:3px;font-weight:bold'>{tok}</span>"
+        )
+    return _TOKEN_PATTERN.sub(repl, text)
+
+
+def _verdict_card(summary: dict, vault: dict) -> str:
+    """Big banner showing BLOCKED / SAFE at a glance."""
+    blocked = summary["files_blocked"] > 0
+    bg = "#3d1010" if blocked else "#0e2f13"
+    border = "#d62728" if blocked else "#2ca02c"
+    icon = "🚫" if blocked else "✅"
+    title = ("FILE(S) BLOCKED — NOT SENT TO AI"
+             if blocked else "ALL FILES SAFE — SENT TO AI")
+    hint = (
+        "⚠️ One or more files were blocked by the fail-closed gate. "
+        "See the reasons per file below."
+        if blocked else
+        "✅ Every file passed all gate checks and was forwarded to the LLM."
+    )
+    return f"""
+    <div style='background:{bg}; border-left:6px solid {border};
+                padding:20px; border-radius:8px; margin:16px 0'>
+      <h2 style='margin:0;color:{border};font-size:22px'>{icon} {title}</h2>
+      <p style='font-size:16px;margin-top:10px;color:#ddd'>
+        <b>{summary['pii_items_found']}</b> PII items found ·
+        <b>{summary['pii_to_llm_with_protection']}</b> leaked to LLM ·
+        <b>{vault['entries']}</b> tokens stored
+      </p>
+      <p style='color:#aaa;font-size:13px;margin-top:6px'>{hint}</p>
+    </div>
+    """
+
+
+def _pipeline_timeline(summary: dict, vault: dict, use_ocr: bool) -> str:
+    """Compact horizontal timeline — replaces the 5 tall boxes."""
+    def chip(label: str, color: str) -> str:
+        return (
+            f"<span style='background:{color};color:#fff;padding:6px 14px;"
+            f"border-radius:16px;font-size:13px;white-space:nowrap'>{label}</span>"
+        )
+    arrow = "<span style='color:#666;margin:0 4px'>→</span>"
+
+    s1 = chip("1. Extract ✓", "#2ca02c")
+    s2 = chip("2. OCR ✓" if use_ocr else "2. OCR off", "#2ca02c" if use_ocr else "#666")
+    s3 = chip(f"3. Detect ({summary['pii_items_found']})", "#2ca02c")
+    s4 = chip(f"4. Redact ({vault['entries']})", "#2ca02c")
+    if summary["files_blocked"]:
+        s5 = chip("5. Gate — BLOCKED", "#d62728")
+    else:
+        s5 = chip("5. Gate — PASSED", "#2ca02c")
+
+    return (
+        "<div style='display:flex;align-items:center;flex-wrap:wrap;"
+        "gap:6px;margin:16px 0;padding:14px;background:#181818;border-radius:8px'>"
+        + s1 + arrow + s2 + arrow + s3 + arrow + s4 + arrow + s5
+        + "</div>"
+    )
 
 
 def _run_pipeline(paths: list[str], use_ner: bool, use_ocr: bool):
@@ -111,7 +193,6 @@ if not uploaded:
 # ── run pipeline on button click ──────────────────────────────────────────────
 if run_btn:
     tmp_paths = []
-    # Save uploaded bytes to a temporary directory with their real filenames
     temp_dir = tempfile.mkdtemp(prefix="pii_shield_")
     for uf in uploaded:
         dest = Path(temp_dir) / uf.name
@@ -125,7 +206,6 @@ if run_btn:
             st.error(f"Pipeline crashed: {exc}")
             st.stop()
 
-    # Build report and save output files to outputs/
     out_dir = ROOT / "outputs"
     out_dir.mkdir(parents=True, exist_ok=True)
     from redaction.report import build_report, write_report, to_markdown
@@ -142,11 +222,11 @@ if run_btn:
         json.dumps(redacted_blocks_list, indent=2), encoding="utf-8"
     )
 
-    # Store in session state
     st.session_state["report"] = report
     st.session_state["llm_payload"] = llm_payload_dict
     st.session_state["redacted_blocks"] = redacted_blocks_list
     st.session_state["report_md"] = to_markdown(report)
+    st.session_state["use_ocr"] = use_ocr
     st.success("✅ Pipeline run complete!", icon="🛡️")
 
 # ── display results ───────────────────────────────────────────────────────────
@@ -157,12 +237,20 @@ report: dict = st.session_state["report"]
 llm_payload_dict: dict = st.session_state.get("llm_payload", {})
 redacted_blocks_list: list = st.session_state.get("redacted_blocks", [])
 report_md: str = st.session_state.get("report_md", "")
+used_ocr: bool = st.session_state.get("use_ocr", True)
 
 s = report["summary"]
 files = report["files"]
+v = report["vault"]
+
+# ══ VERDICT CARD (top of page) ═══════════════════════════════════════════════
+st.markdown(_verdict_card(s, v), unsafe_allow_html=True)
+
+# ══ PIPELINE TIMELINE (compact) ══════════════════════════════════════════════
+st.markdown("##### 🔄 Pipeline Stages")
+st.markdown(_pipeline_timeline(s, v, used_ocr), unsafe_allow_html=True)
 
 # ══ TOP SUMMARY METRICS ══════════════════════════════════════════════════════
-st.divider()
 st.subheader("📊 Session Summary")
 
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -174,10 +262,9 @@ c3.metric("PII items found", s["pii_items_found"])
 c4.metric("PII reaching LLM", s["pii_to_llm_with_protection"],
           delta=f"was {s['pii_to_llm_without_protection']} unprotected",
           delta_color="inverse" if s["pii_to_llm_with_protection"] == 0 else "normal")
-c5.metric("Vault entries", report["vault"]["entries"],
-          delta="🔒 encrypted" if report["vault"]["encrypted"] else "⚠️ unencrypted")
+c5.metric("Vault entries", v["entries"],
+          delta="🔒 encrypted" if v["encrypted"] else "⚠️ unencrypted")
 
-# PII breakdown bar
 if s["pii_items_found"]:
     st.markdown("**PII by entity type:**")
     cols = st.columns(len(s["pii_by_entity"]))
@@ -217,7 +304,7 @@ for tab, fr in zip(tabs, files):
 
         left, right = st.columns([1, 1], gap="large")
 
-        # LEFT: PII findings
+        # LEFT: PII findings — capped display
         with left:
             st.markdown("#### 🔍 Detected PII")
             if not fr["findings"]:
@@ -228,11 +315,14 @@ for tab, fr in zip(tabs, files):
                     emoji = ENTITY_EMOJI.get(ent, "🔑")
                     tier = hits[0]["tier"]
                     tier_color = "red" if tier == "HIGH" else "orange" if tier == "MEDIUM" else "green"
+
                     with st.expander(
                         f"{emoji} **{ent}** — {len(hits)} hit(s) · Tier: :{tier_color}[**{tier}**]",
-                        expanded=True,
+                        expanded=(len(hits) <= PII_SHOW_LIMIT),
                     ):
-                        for h in hits:
+                        # Cap the number shown
+                        visible = hits[:PII_SHOW_LIMIT]
+                        for h in visible:
                             rev = "↩️ reversible token" if h["reversible"] else "🔒 permanent mask"
                             token = h.get("replacement_token") or "—"
                             st.markdown(
@@ -241,7 +331,20 @@ for tab, fr in zip(tabs, files):
                                 f"Page/slide: `{h.get('page_or_slide', '?')}`"
                             )
 
-        # RIGHT: Redacted text
+                        hidden = len(hits) - PII_SHOW_LIMIT
+                        if hidden > 0:
+                            st.caption(f"… and **{hidden}** more {ent} item(s) hidden for readability.")
+                            with st.expander(f"Show all {len(hits)} {ent} items", expanded=False):
+                                for h in hits[PII_SHOW_LIMIT:]:
+                                    rev = "↩️" if h["reversible"] else "🔒"
+                                    token = h.get("replacement_token") or "—"
+                                    st.markdown(
+                                        f"- Token: `{token}` ({rev}) · "
+                                        f"Conf: `{h['confidence']:.0%}` · "
+                                        f"Page: `{h.get('page_or_slide', '?')}`"
+                                    )
+
+        # RIGHT: Redacted text with highlighted tokens
         with right:
             st.markdown("#### ✂️ Redacted Text (Released to LLM)")
             matched_text = None
@@ -258,18 +361,35 @@ for tab, fr in zip(tabs, files):
                 if gate["reasons"]:
                     for r in gate["reasons"]:
                         st.markdown(f"- **{r['code']}**: {r['message']}")
-            elif matched_text is not None:
-                st.code(matched_text if matched_text.strip() else "(Empty text)", language=None)
+            elif matched_text is not None and matched_text.strip():
+                highlighted = _highlight_tokens(matched_text)
+                st.markdown(
+                    "<div style='background:#1e1e1e;padding:12px;border-radius:6px;"
+                    "font-family:monospace;font-size:12px;max-height:500px;"
+                    "overflow-y:auto;white-space:pre-wrap;line-height:1.5;color:#ddd'>"
+                    f"{highlighted}"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                st.caption(
+                    "🟡 = MEDIUM tier (reversible) · 🟢 = LOW tier · 🔴 = HIGH tier (permanent mask)"
+                )
+                # Copy redacted text button
+                st.download_button(
+                    "📋 Download redacted text (.txt)",
+                    data=matched_text,
+                    file_name=f"{fname}.redacted.txt",
+                    mime="text/plain",
+                    use_container_width=True,
+                )
             else:
                 st.info("No text released for this file.")
 
-        # Gate warnings
         if gate.get("warnings"):
             with st.expander(f"⚠️ Gate warnings ({len(gate['warnings'])})", expanded=False):
                 for w in gate["warnings"]:
                     st.warning(w)
 
-        # OCR summary
         ocr = fr.get("ocr") or {}
         if ocr.get("images_total"):
             with st.expander("🖼️ OCR Details", expanded=False):
@@ -284,7 +404,6 @@ for tab, fr in zip(tabs, files):
                         f"{ocr.get('sweep_fragments', 0)} email-like fragments redacted"
                     )
 
-        # Extraction warnings
         if fr.get("extraction_warnings"):
             with st.expander(f"📋 Extraction warnings ({len(fr['extraction_warnings'])})", expanded=False):
                 for w in fr["extraction_warnings"]:
@@ -332,12 +451,10 @@ with dl4:
         use_container_width=True,
     )
 
-# ── expandable raw JSON report ───────────────────────────────────────────────
 with st.expander("🗂️ Raw JSON Exposure Report", expanded=False):
     st.json(report)
 
 # ── vault status ─────────────────────────────────────────────────────────────
-v = report["vault"]
 st.divider()
 col_v1, col_v2 = st.columns([1, 2])
 with col_v1:
@@ -361,4 +478,3 @@ with col_v2:
 st.caption(
     f"Report generated at {report['generated_at']} · Session `{report['session_id']}`"
 )
-
